@@ -1,0 +1,6 @@
+{
+  "name": "GreenBDG Decarbonisation Assessment Agent",
+  "description": "AI-powered building energy and decarbonisation assessment platform for verified environmental data, anomaly detection, interval load analytics, and actionable decarbonisation pathways.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
