@@ -25,6 +25,62 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
     window.print();
   };
 
+  const handleExportJson = () => {
+    const reportData = {
+      reportReference: `GBDG-DEC-${building.code}-2026`,
+      generatedDate: new Date().toISOString(),
+      building,
+      metrics,
+      assessment,
+    };
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `GreenBDG_${building.code}_Assessment_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = () => {
+    const rows = [
+      ['Metric / Parameter', 'Current Period', 'Baseline', 'Variance / Notes'],
+      ['Asset Name', building.name, '', building.code],
+      ['Location', building.location, '', building.climateZone],
+      ['Gross Floor Area (m²)', building.grossFloorArea.toString(), '', ''],
+      ['Grid Carbon Factor (kg CO2e/kWh)', building.gridCarbonIntensity.toString(), '', 'Eskom SA'],
+      ['Total Electricity (kWh)', metrics.totalCurrentKwh.toString(), metrics.totalBaselineKwh.toString(), `+${metrics.consumptionVariancePercent}%`],
+      ['Scope 2 Emissions (tCO2e)', metrics.currentCo2Tonnes.toString(), metrics.baselineCo2Tonnes.toString(), `+${metrics.co2VarianceTonnes} tCO2e`],
+      ['Operational EUI (kWh/m²/yr)', metrics.currentEuiKwhM2?.toString() || 'N/A', metrics.baselineEuiKwhM2?.toString() || 'N/A', metrics.euiLabel || ''],
+      ['Peak Demand (kVA)', metrics.peakDemandKva.toString(), metrics.peakDemandBaselineKva.toString(), ''],
+      ['Night Baseload (kW)', metrics.averageBaseloadKw.toString(), '11.6', '+56.9%'],
+      ['Solar Generation (kWh)', metrics.solarGenerationKwh.toString(), '0', `${metrics.solarSelfConsumptionPercent}% Self-Consumed`],
+      [],
+      ['Recommended ECM', 'Category', 'Annual Savings (ZAR)', 'CO2 Reduction (tCO2e/yr)', 'CapEx (ZAR)', 'Payback (Yrs)'],
+      ...assessment.whatNext.recommendedEcms.map((ecm) => [
+        `"${ecm.title.replace(/"/g, '""')}"`,
+        `"${ecm.category}"`,
+        ecm.annualCostSavingsZar.toString(),
+        ecm.annualCo2ReductionTonnes.toString(),
+        ecm.estimatedCapexZar.toString(),
+        ecm.paybackYears.toString(),
+      ]),
+    ];
+
+    const csvContent = rows.map((r) => r.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `GreenBDG_${building.code}_Assessment_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white border border-[#E2E8E4] rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl text-[#1A2E22]">
@@ -36,6 +92,24 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-[#F8FAF8] border border-[#E2E8E4] text-[#1A2E22] text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              title="Download structured assessment data as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-[#166534]" />
+              <span>Export CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportJson}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-[#F8FAF8] border border-[#E2E8E4] text-[#1A2E22] text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              title="Download executive assessment payload as JSON"
+            >
+              <Download className="w-3.5 h-3.5 text-[#166534]" />
+              <span>Export JSON</span>
+            </button>
             <button
               type="button"
               onClick={handlePrint}

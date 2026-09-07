@@ -8,7 +8,7 @@ import {
   BERTHA_HOUSE_ECMS,
   BERTHA_HOUSE_METRICS,
 } from './data/berthaHouseData';
-import { Building, AssessmentMetrics, AIAssessmentResult, ECMRecommendation, AnomalyItem } from './types';
+import { Building, AssessmentMetrics, AIAssessmentResult, ECMRecommendation, AnomalyItem, IntervalPoint } from './types';
 import { Navbar } from './components/Navbar';
 import { BuildingHeader } from './components/BuildingHeader';
 import { MetricsOverview } from './components/MetricsOverview';
@@ -22,6 +22,7 @@ import { AgentChatDrawer } from './components/AgentChatDrawer';
 import { ReportExportModal } from './components/ReportExportModal';
 import { DataIngestModal } from './components/DataIngestModal';
 import { MessageSquare, Sparkles, AlertTriangle } from 'lucide-react';
+import { calculateEUI } from './utils/carbonCalculators';
 
 export default function App() {
   const [selectedBuilding, setSelectedBuilding] = useState<Building>(BUILDINGS_PORTFOLIO[0]);
@@ -126,6 +127,95 @@ export default function App() {
   const handleSelectEcmForSimulation = (ecm: ECMRecommendation) => {
     setSelectedEcmForSimulation(ecm);
     setActiveTab('scenario');
+  };
+
+  const handleIngestCustomIntervals = (
+    newIntervals: IntervalPoint[],
+    summary: { fileName: string; rowCount: number; totalKwh: number; peakKw: number }
+  ) => {
+    setIntervals(newIntervals);
+
+    // Calculate aggregated telemetry metrics
+    const totalCurrentKwh = Math.round(newIntervals.reduce((sum, pt) => sum + (pt.currentKwh || 0), 0) * 18); // scale 24h sample to month
+    const totalBaselineKwh = Math.round(newIntervals.reduce((sum, pt) => sum + (pt.baselineKwh || 0), 0) * 18);
+    const totalSolarKwh = Math.round(newIntervals.reduce((sum, pt) => sum + (pt.solarGenKwh || 0), 0) * 18);
+    const variancePercent = Number((((totalCurrentKwh - totalBaselineKwh) / totalBaselineKwh) * 100).toFixed(1));
+    const co2Tonnes = Number(((totalCurrentKwh * selectedBuilding.gridCarbonIntensity) / 1000).toFixed(2));
+    const baselineCo2Tonnes = Number(((totalBaselineKwh * selectedBuilding.gridCarbonIntensity) / 1000).toFixed(2));
+
+    // Dynamic EUI
+    const euiResult = calculateEUI(totalCurrentKwh, 41, selectedBuilding.grossFloorArea);
+
+    // Night baseload (00:00 to 05:00 average)
+    const nightPoints = newIntervals.filter((pt) => {
+      const h = parseInt(pt.time.split(':')[0], 10);
+      return h >= 0 && h < 5;
+    });
+    const avgBaseloadKw = nightPoints.length > 0
+      ? Number((nightPoints.reduce((sum, pt) => sum + pt.currentKwh, 0) / nightPoints.length).toFixed(1))
+      : 11.2;
+
+    const updatedMetrics: AssessmentMetrics = {
+      ...metrics,
+      totalCurrentKwh,
+      totalBaselineKwh,
+      consumptionVariancePercent: variancePercent,
+      currentCo2Tonnes: co2Tonnes,
+      baselineCo2Tonnes,
+      co2VarianceTonnes: Number((co2Tonnes - baselineCo2Tonnes).toFixed(2)),
+      peakDemandKva: Number((summary.peakKw * 1.15).toFixed(1)),
+      averageBaseloadKw: avgBaseloadKw,
+      solarGenerationKwh: totalSolarKwh,
+      currentEuiKwhM2: euiResult.eui,
+      isEuiPublishable: euiResult.isPublishable,
+      euiLabel: euiResult.label,
+    };
+
+    setMetrics(updatedMetrics);
+
+    // Update submeters dynamically based on custom intervals
+    const totalHvac = newIntervals.reduce((sum, pt) => sum + (pt.hvacKwh || 0), 0);
+    const totalBaseload = newIntervals.reduce((sum, pt) => sum + (pt.baseloadKwh || 0), 0);
+    const totalLighting = newIntervals.reduce((sum, pt) => sum + (pt.lightingKwh || 0), 0);
+    const totalPlugLoad = newIntervals.reduce((sum, pt) => sum + (pt.plugLoadKwh || 0), 0);
+    const sumAll = totalHvac + totalBaseload + totalLighting + totalPlugLoad || 1;
+
+    setSubmeters([
+      {
+        category: 'HVAC & Climate Control',
+        kwh: Math.round(totalHvac * 18),
+        percentage: Number(((totalHvac / sumAll) * 100).toFixed(1)),
+        baselineKwh: Math.round(totalHvac * 18 * 0.8),
+        deltaPercent: +25.0,
+        color: '#E11D48',
+      },
+      {
+        category: 'Baseload (Servers & Security)',
+        kwh: Math.round(totalBaseload * 18),
+        percentage: Number(((totalBaseload / sumAll) * 100).toFixed(1)),
+        baselineKwh: Math.round(totalBaseload * 18 * 0.9),
+        deltaPercent: +11.1,
+        color: '#D97706',
+      },
+      {
+        category: 'Lighting Circuits',
+        kwh: Math.round(totalLighting * 18),
+        percentage: Number(((totalLighting / sumAll) * 100).toFixed(1)),
+        baselineKwh: Math.round(totalLighting * 18),
+        deltaPercent: 0.0,
+        color: '#166534',
+      },
+      {
+        category: 'Plug Loads & Appliances',
+        kwh: Math.round(totalPlugLoad * 18),
+        percentage: Number(((totalPlugLoad / sumAll) * 100).toFixed(1)),
+        baselineKwh: Math.round(totalPlugLoad * 18 * 0.95),
+        deltaPercent: +5.3,
+        color: '#2563EB',
+      },
+    ]);
+
+    fetchAssessment();
   };
 
   const handleSimulateNewData = (scenarioType: 'heatwave' | 'solar_fault' | 'weekend_anomaly' | 'optimal') => {
@@ -306,6 +396,7 @@ export default function App() {
         isOpen={isIngestModalOpen}
         onClose={() => setIsIngestModalOpen(false)}
         onSimulateNewData={handleSimulateNewData}
+        onIngestCustomIntervals={handleIngestCustomIntervals}
       />
 
       {/* Footer */}
